@@ -51,20 +51,35 @@ export function bindInputListeners(
   window.addEventListener('keydown', onKeyDown)
   window.addEventListener('keyup', onKeyUp)
 
-  if (!('ontouchstart' in window)) {
-    canvas.addEventListener('click', () => {
-      if (!onChatFocus()) {
-        canvas.requestPointerLock()
-      }
-    })
-  }
+  canvas.addEventListener('click', () => {
+    if (!onChatFocus()) {
+      canvas.requestPointerLock?.()
+    }
+  })
 
   let yaw = 0
+  let dragging = false
+
+  function onMouseDown(e: MouseEvent) {
+    if (e.button === 0 && !onChatFocus() && document.pointerLockElement !== canvas) {
+      dragging = true
+    }
+  }
+
+  function onMouseUp() {
+    dragging = false
+  }
+
   function onMouseMove(e: MouseEvent) {
     if (document.pointerLockElement === canvas) {
       yaw -= e.movementX * 0.003
+    } else if (dragging) {
+      yaw -= e.movementX * 0.003
     }
   }
+
+  canvas.addEventListener('mousedown', onMouseDown)
+  window.addEventListener('mouseup', onMouseUp)
   document.addEventListener('mousemove', onMouseMove)
 
   function getYaw() { return yaw }
@@ -73,6 +88,8 @@ export function bindInputListeners(
   function cleanup() {
     window.removeEventListener('keydown', onKeyDown)
     window.removeEventListener('keyup', onKeyUp)
+    canvas.removeEventListener('mousedown', onMouseDown)
+    window.removeEventListener('mouseup', onMouseUp)
     document.removeEventListener('mousemove', onMouseMove)
   }
 
