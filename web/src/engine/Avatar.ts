@@ -18,21 +18,47 @@ export interface AvatarMesh {
   nameTag: THREE.Sprite | null
 }
 
-/** Create a blocky Roblox-style avatar from box geometries */
 export function createAvatar(colors: AvatarColors, name?: string): AvatarMesh {
   const group = new THREE.Group()
 
   // Head (1.2 x 1.2 x 1.2)
   const headGeo = new THREE.BoxGeometry(1.2, 1.2, 1.2)
-  const headMat = new THREE.MeshLambertMaterial({ color: colors.head })
+  const headMat = new THREE.MeshStandardMaterial({ color: colors.head, roughness: 0.7, metalness: 0.0 })
   const head = new THREE.Mesh(headGeo, headMat)
   head.position.y = 3.1
   head.castShadow = true
   group.add(head)
 
+  // Face — eyes and mouth on front of head
+  const eyeGeo = new THREE.BoxGeometry(0.2, 0.2, 0.05)
+  const eyeMat = new THREE.MeshBasicMaterial({ color: 0x1a1a2e })
+  const leftEye = new THREE.Mesh(eyeGeo, eyeMat)
+  leftEye.position.set(-0.25, 3.2, 0.61)
+  group.add(leftEye)
+  const rightEye = new THREE.Mesh(eyeGeo, eyeMat)
+  rightEye.position.set(0.25, 3.2, 0.61)
+  group.add(rightEye)
+
+  // Pupils (white highlights)
+  const pupilGeo = new THREE.BoxGeometry(0.08, 0.08, 0.02)
+  const pupilMat = new THREE.MeshBasicMaterial({ color: 0xffffff })
+  const lPupil = new THREE.Mesh(pupilGeo, pupilMat)
+  lPupil.position.set(-0.2, 3.24, 0.63)
+  group.add(lPupil)
+  const rPupil = new THREE.Mesh(pupilGeo, pupilMat)
+  rPupil.position.set(0.3, 3.24, 0.63)
+  group.add(rPupil)
+
+  // Smile
+  const smileGeo = new THREE.BoxGeometry(0.4, 0.08, 0.05)
+  const smileMat = new THREE.MeshBasicMaterial({ color: 0x1a1a2e })
+  const smile = new THREE.Mesh(smileGeo, smileMat)
+  smile.position.set(0, 2.9, 0.61)
+  group.add(smile)
+
   // Torso (1.4 x 1.6 x 0.8)
   const torsoGeo = new THREE.BoxGeometry(1.4, 1.6, 0.8)
-  const torsoMat = new THREE.MeshLambertMaterial({ color: colors.torso })
+  const torsoMat = new THREE.MeshStandardMaterial({ color: colors.torso, roughness: 0.8, metalness: 0.0 })
   const torso = new THREE.Mesh(torsoGeo, torsoMat)
   torso.position.y = 1.8
   torso.castShadow = true
@@ -40,7 +66,7 @@ export function createAvatar(colors: AvatarColors, name?: string): AvatarMesh {
 
   // Arms (0.5 x 1.4 x 0.5)
   const armGeo = new THREE.BoxGeometry(0.5, 1.4, 0.5)
-  const armMat = new THREE.MeshLambertMaterial({ color: colors.arms })
+  const armMat = new THREE.MeshStandardMaterial({ color: colors.arms, roughness: 0.7, metalness: 0.0 })
 
   const leftArm = new THREE.Mesh(armGeo, armMat.clone())
   leftArm.position.set(-0.95, 1.8, 0)
@@ -54,7 +80,7 @@ export function createAvatar(colors: AvatarColors, name?: string): AvatarMesh {
 
   // Legs (0.6 x 1.4 x 0.6)
   const legGeo = new THREE.BoxGeometry(0.6, 1.4, 0.6)
-  const legMat = new THREE.MeshLambertMaterial({ color: colors.legs })
+  const legMat = new THREE.MeshStandardMaterial({ color: colors.legs, roughness: 0.8, metalness: 0.0 })
 
   const leftLeg = new THREE.Mesh(legGeo, legMat.clone())
   leftLeg.position.set(-0.35, 0.5, 0)
@@ -66,7 +92,7 @@ export function createAvatar(colors: AvatarColors, name?: string): AvatarMesh {
   rightLeg.castShadow = true
   group.add(rightLeg)
 
-  // Name tag (floating text above head)
+  // Name tag
   let nameTag: THREE.Sprite | null = null
   if (name) {
     nameTag = createNameTag(name)
@@ -99,22 +125,20 @@ function createNameTag(name: string): THREE.Sprite {
 }
 
 export function updateAvatarColors(avatar: AvatarMesh, colors: AvatarColors) {
-  ;(avatar.head.material as THREE.MeshLambertMaterial).color.set(colors.head)
-  ;(avatar.torso.material as THREE.MeshLambertMaterial).color.set(colors.torso)
-  ;(avatar.leftArm.material as THREE.MeshLambertMaterial).color.set(colors.arms)
-  ;(avatar.rightArm.material as THREE.MeshLambertMaterial).color.set(colors.arms)
-  ;(avatar.leftLeg.material as THREE.MeshLambertMaterial).color.set(colors.legs)
-  ;(avatar.rightLeg.material as THREE.MeshLambertMaterial).color.set(colors.legs)
+  ;(avatar.head.material as THREE.MeshStandardMaterial).color.set(colors.head)
+  ;(avatar.torso.material as THREE.MeshStandardMaterial).color.set(colors.torso)
+  ;(avatar.leftArm.material as THREE.MeshStandardMaterial).color.set(colors.arms)
+  ;(avatar.rightArm.material as THREE.MeshStandardMaterial).color.set(colors.arms)
+  ;(avatar.leftLeg.material as THREE.MeshStandardMaterial).color.set(colors.legs)
+  ;(avatar.rightLeg.material as THREE.MeshStandardMaterial).color.set(colors.legs)
 }
 
-/** Simple walk animation — swing arms and legs */
 export function animateWalk(avatar: AvatarMesh, time: number, speed: number) {
   if (speed < 0.01) {
-    // Idle — reset to neutral
-    avatar.leftArm.rotation.x = 0
-    avatar.rightArm.rotation.x = 0
-    avatar.leftLeg.rotation.x = 0
-    avatar.rightLeg.rotation.x = 0
+    avatar.leftArm.rotation.x *= 0.85
+    avatar.rightArm.rotation.x *= 0.85
+    avatar.leftLeg.rotation.x *= 0.85
+    avatar.rightLeg.rotation.x *= 0.85
     return
   }
   const swing = Math.sin(time * 8) * 0.5

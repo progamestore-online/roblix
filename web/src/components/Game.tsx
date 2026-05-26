@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import type { AvatarColors } from '../App.tsx'
-import { createScene, resizeScene, disposeScene } from '../engine/Scene.ts'
+import { createScene, resizeScene, disposeScene, updateScene } from '../engine/Scene.ts'
 import { createAvatar, animateWalk, disposeAvatar } from '../engine/Avatar.ts'
 import type { AvatarMesh } from '../engine/Avatar.ts'
 import { createBody, stepPhysics } from '../engine/Physics.ts'
@@ -192,6 +192,7 @@ export default function Game({ roomId, avatar, playerName, onLeave }: GameProps)
         { y: yaw },
       )
 
+      updateScene(ctx, elapsed)
       ctx.renderer.render(ctx.scene, ctx.camera)
     }
 
