@@ -8,6 +8,7 @@ export interface InputState {
   left: boolean
   right: boolean
   jump: boolean
+  jumpTrigger: boolean
   touchMoveX: number
   touchMoveZ: number
 }
@@ -18,7 +19,7 @@ const CAMERA_HEIGHT = 6
 const CAMERA_LERP = 5
 
 export function createInputState(): InputState {
-  return { forward: false, backward: false, left: false, right: false, jump: false, touchMoveX: 0, touchMoveZ: 0 }
+  return { forward: false, backward: false, left: false, right: false, jump: false, jumpTrigger: false, touchMoveX: 0, touchMoveZ: 0 }
 }
 
 export function bindInputListeners(
@@ -50,11 +51,13 @@ export function bindInputListeners(
   window.addEventListener('keydown', onKeyDown)
   window.addEventListener('keyup', onKeyUp)
 
-  canvas.addEventListener('click', () => {
-    if (!onChatFocus()) {
-      canvas.requestPointerLock()
-    }
-  })
+  if (!('ontouchstart' in window)) {
+    canvas.addEventListener('click', () => {
+      if (!onChatFocus()) {
+        canvas.requestPointerLock()
+      }
+    })
+  }
 
   let yaw = 0
   function onMouseMove(e: MouseEvent) {
@@ -91,8 +94,8 @@ export function applyInput(
 
   // Touch joystick input (relative to camera yaw)
   if (Math.abs(input.touchMoveX) > 0.01 || Math.abs(input.touchMoveZ) > 0.01) {
-    dx += input.touchMoveX * Math.cos(yaw) + input.touchMoveZ * Math.sin(yaw)
-    dz += -input.touchMoveX * Math.sin(yaw) + input.touchMoveZ * Math.cos(yaw)
+    dx += -input.touchMoveX * Math.cos(yaw) + input.touchMoveZ * Math.sin(yaw)
+    dz += input.touchMoveX * Math.sin(yaw) + input.touchMoveZ * Math.cos(yaw)
   }
 
   const len = Math.sqrt(dx * dx + dz * dz)
@@ -104,9 +107,9 @@ export function applyInput(
   body.vx = dx
   body.vz = dz
 
-  if (input.jump) {
+  if (input.jump || input.jumpTrigger) {
     jump(body)
-    input.jump = false
+    input.jumpTrigger = false
   }
 }
 

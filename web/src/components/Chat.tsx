@@ -51,7 +51,7 @@ export default function Chat({ messages, onSend, onFocusChange }: ChatProps) {
   }
 
   return (
-    <div className="absolute bottom-4 left-4 w-80 max-w-[calc(100%-2rem)]">
+    <div className="absolute bottom-44 left-4 sm:bottom-4 w-80 max-w-[calc(100%-2rem)]" data-chat>
       {/* Message list */}
       <div
         ref={listRef}

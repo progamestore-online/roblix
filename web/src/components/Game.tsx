@@ -47,7 +47,7 @@ export default function Game({ roomId, avatar, playerName, onLeave }: GameProps)
   }, [])
 
   const handleTouchJump = useCallback(() => {
-    inputRef.current.jump = true
+    inputRef.current.jumpTrigger = true
   }, [])
 
   const handleTouchLook = useCallback((dx: number) => {
@@ -80,7 +80,7 @@ export default function Game({ roomId, avatar, playerName, onLeave }: GameProps)
     const mp = createMultiplayerClient()
     mpRef.current = mp
 
-    let wasGrounded = false
+    let prevGrounded = true
 
     mp.onMessage((msg: ServerMessage) => {
       if (msg.type === 'init') {
@@ -145,20 +145,16 @@ export default function Game({ roomId, avatar, playerName, onLeave }: GameProps)
       const elapsed = ctx.clock.getElapsedTime()
       const yaw = getYaw()
 
-      const wasAirborne = !body.grounded
-
-      // Check if about to jump
-      const wantsJump = input.jump && body.grounded
+      const wantsJump = (input.jump || input.jumpTrigger) && body.grounded
       if (wantsJump) playJumpSound()
 
       applyInput(input, body, yaw)
       stepPhysics(body, dt, world.colliders)
 
-      // Land sound
-      if (wasAirborne && body.grounded && !wasGrounded) {
+      if (!prevGrounded && body.grounded) {
         playLandSound()
       }
-      wasGrounded = body.grounded
+      prevGrounded = body.grounded
 
       myAvatar.group.position.set(body.x, body.y, body.z)
       myAvatar.group.rotation.y = yaw
