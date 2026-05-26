@@ -1,6 +1,6 @@
 import { DurableObject } from 'cloudflare:workers'
 
-const ID_RE = /^[a-z0-9]{6,12}$/
+const ID_RE = /^[a-z0-9]{3,12}$/
 
 function randomId() {
   const alphabet = 'abcdefghijkmnpqrstuvwxyz23456789'

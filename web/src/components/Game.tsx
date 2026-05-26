@@ -30,6 +30,7 @@ export default function Game({ roomId, avatar, playerName, onLeave }: GameProps)
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [chatFocused, setChatFocused] = useState(false)
   const [playerCount, setPlayerCount] = useState(1)
+  const [copied, setCopied] = useState(false)
   const [showTouch] = useState(isTouchDevice)
   const chatFocusedRef = useRef(false)
   const inputRef = useRef(createInputState())
@@ -230,9 +231,20 @@ export default function Game({ roomId, avatar, playerName, onLeave }: GameProps)
       </div>
 
       {/* Room code */}
-      <div className="absolute top-4 right-4 bg-black/60 backdrop-blur-sm rounded-lg px-4 py-2 text-white text-sm" data-ui>
+      <button
+        onClick={() => {
+          const url = `${location.origin}?room=${roomId}`
+          navigator.clipboard?.writeText(url).then(() => {
+            setCopied(true)
+            setTimeout(() => setCopied(false), 2000)
+          })
+        }}
+        className="absolute top-4 right-4 bg-black/60 hover:bg-black/80 backdrop-blur-sm rounded-lg px-4 py-2 text-white text-sm transition cursor-pointer"
+        data-ui
+      >
         Room: <span className="font-mono font-bold text-indigo-300">{roomId}</span>
-      </div>
+        <span className="ml-2 text-white/50">{copied ? 'Copied!' : '(tap to share)'}</span>
+      </button>
 
       {/* Leave button */}
       <button

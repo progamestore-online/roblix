@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import Lobby from './components/Lobby.tsx'
 import Game from './components/Game.tsx'
 import AvatarCustomizer from './components/AvatarCustomizer.tsx'
@@ -34,15 +34,19 @@ export default function App() {
     return localStorage.getItem('roblix-name') || ''
   })
 
-  function handleJoinWorld(_worldId: string) {
-    // Create a new room for this world
-    fetch('/api/rooms/new', { method: 'POST' })
-      .then(r => r.json())
-      .then(({ roomId: id }) => {
-        setRoomId(id)
-        setView('game')
-      })
-      .catch(console.error)
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const room = params.get('room')
+    if (room && /^[a-z0-9]{3,12}$/.test(room)) {
+      setRoomId(room)
+      setView('game')
+      window.history.replaceState({}, '', window.location.pathname)
+    }
+  }, [])
+
+  function handleJoinWorld(worldId: string) {
+    setRoomId(worldId)
+    setView('game')
   }
 
   function handleJoinRoom(id: string) {
