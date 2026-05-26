@@ -8,6 +8,8 @@ export interface InputState {
   left: boolean
   right: boolean
   jump: boolean
+  touchMoveX: number
+  touchMoveZ: number
 }
 
 const MOVE_SPEED = 8
@@ -16,7 +18,7 @@ const CAMERA_HEIGHT = 6
 const CAMERA_LERP = 5
 
 export function createInputState(): InputState {
-  return { forward: false, backward: false, left: false, right: false, jump: false }
+  return { forward: false, backward: false, left: false, right: false, jump: false, touchMoveX: 0, touchMoveZ: 0 }
 }
 
 export function bindInputListeners(
@@ -48,7 +50,6 @@ export function bindInputListeners(
   window.addEventListener('keydown', onKeyDown)
   window.addEventListener('keyup', onKeyUp)
 
-  // Pointer lock for mouse-look
   canvas.addEventListener('click', () => {
     if (!onChatFocus()) {
       canvas.requestPointerLock()
@@ -64,6 +65,7 @@ export function bindInputListeners(
   document.addEventListener('mousemove', onMouseMove)
 
   function getYaw() { return yaw }
+  function addYaw(delta: number) { yaw += delta }
 
   function cleanup() {
     window.removeEventListener('keydown', onKeyDown)
@@ -71,7 +73,7 @@ export function bindInputListeners(
     document.removeEventListener('mousemove', onMouseMove)
   }
 
-  return { cleanup, getYaw }
+  return { cleanup, getYaw, addYaw }
 }
 
 export function applyInput(
@@ -87,7 +89,12 @@ export function applyInput(
   if (input.left) { dx += Math.cos(yaw); dz -= Math.sin(yaw) }
   if (input.right) { dx -= Math.cos(yaw); dz += Math.sin(yaw) }
 
-  // Normalize diagonal movement
+  // Touch joystick input (relative to camera yaw)
+  if (Math.abs(input.touchMoveX) > 0.01 || Math.abs(input.touchMoveZ) > 0.01) {
+    dx += input.touchMoveX * Math.cos(yaw) + input.touchMoveZ * Math.sin(yaw)
+    dz += -input.touchMoveX * Math.sin(yaw) + input.touchMoveZ * Math.cos(yaw)
+  }
+
   const len = Math.sqrt(dx * dx + dz * dz)
   if (len > 0) {
     dx = (dx / len) * MOVE_SPEED
@@ -99,6 +106,7 @@ export function applyInput(
 
   if (input.jump) {
     jump(body)
+    input.jump = false
   }
 }
 
@@ -108,7 +116,6 @@ export function updateCamera(
   yaw: number,
   dt: number,
 ) {
-  // Third-person camera behind and above the player
   const targetX = body.x - Math.sin(yaw) * CAMERA_DISTANCE
   const targetY = body.y + CAMERA_HEIGHT
   const targetZ = body.z - Math.cos(yaw) * CAMERA_DISTANCE
@@ -118,6 +125,5 @@ export function updateCamera(
   camera.position.y += (targetY - camera.position.y) * lerp
   camera.position.z += (targetZ - camera.position.z) * lerp
 
-  // Look at player
   camera.lookAt(body.x, body.y + 2, body.z)
 }
