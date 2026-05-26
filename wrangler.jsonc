@@ -19,6 +19,7 @@
 
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["RoomDO"] }],
 
+  "workers_dev": true,
   "routes": [
     { "pattern": "roblix.progamestore.online", "zone_name": "progamestore.online", "custom_domain": true }
   ]
