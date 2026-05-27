@@ -116,7 +116,7 @@ export default function Game({ roomId, avatar, playerName, onLeave }: GameProps)
       createSandboxWorld()
     ctx.scene.add(world.group)
 
-    const spawn = { x: 0, y: 2, z: 0 }
+    const spawn = world.spawn
     // Obby victory platform footprint (from Worlds.ts createObbyWorld).
     const OBBY_FINISH = { x: -8, y: 29, z: 6, w: 6, d: 6 }
 
