@@ -13,7 +13,7 @@ export interface InputState {
   touchMoveZ: number
 }
 
-const MOVE_SPEED = 8
+const MOVE_SPEED = 14
 const CAMERA_DISTANCE = 12
 const CAMERA_HEIGHT = 6
 const CAMERA_LERP = 5
