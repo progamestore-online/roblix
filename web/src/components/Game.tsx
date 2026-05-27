@@ -6,12 +6,15 @@ import type { AvatarMesh } from '../engine/Avatar.ts'
 import { createBody, stepPhysics } from '../engine/Physics.ts'
 import { createInputState, bindInputListeners, applyInput, updateCamera } from '../engine/Controls.ts'
 import { createHubWorld, animateCoins, collectCoins } from '../engine/World.ts'
+import { createBuilder, updateGhostBlock, placeBlock, removeBlock, setBuilderColor, disposeBuilder, BLOCK_COLORS } from '../engine/Builder.ts'
+import type { BuilderState } from '../engine/Builder.ts'
 import { spawnCoinParticles, updateParticles, disposeAllParticles } from '../engine/Particles.ts'
-import { playCoinSound, playJumpSound, playLandSound, playChatSound } from '../engine/Audio.ts'
+import { playCoinSound, playJumpSound, playLandSound, playChatSound, playPlaceSound, playRemoveSound } from '../engine/Audio.ts'
 import { createMultiplayerClient } from '../multiplayer.ts'
 import type { RemotePlayer, ChatMessage, ServerMessage } from '../multiplayer.ts'
 import Chat from './Chat.tsx'
 import TouchControls from './TouchControls.tsx'
+import BuilderHUD from './BuilderHUD.tsx'
 
 interface GameProps {
   roomId: string
@@ -32,9 +35,13 @@ export default function Game({ roomId, avatar, playerName, onLeave }: GameProps)
   const [playerCount, setPlayerCount] = useState(1)
   const [copied, setCopied] = useState(false)
   const [showTouch] = useState(isTouchDevice)
+  const [buildMode, setBuildMode] = useState(false)
+  const [buildColor, setBuildColor] = useState(BLOCK_COLORS[5])
   const chatFocusedRef = useRef(false)
   const inputRef = useRef(createInputState())
   const addYawRef = useRef<(delta: number) => void>(() => {})
+  const builderRef = useRef<BuilderState | null>(null)
+  const worldCollidersRef = useRef<import('../engine/Physics.ts').AABB[]>([])
 
   useEffect(() => {
     chatFocusedRef.current = chatFocused
@@ -55,6 +62,19 @@ export default function Game({ roomId, avatar, playerName, onLeave }: GameProps)
     addYawRef.current(dx)
   }, [])
 
+  const handleToggleBuild = useCallback(() => {
+    setBuildMode(prev => {
+      const next = !prev
+      if (builderRef.current) builderRef.current.enabled = next
+      return next
+    })
+  }, [])
+
+  const handleSelectColor = useCallback((color: number) => {
+    setBuildColor(color)
+    if (builderRef.current) setBuilderColor(builderRef.current, color)
+  }, [])
+
   useEffect(() => {
     const canvas = canvasRef.current
     if (!canvas) return
@@ -62,6 +82,11 @@ export default function Game({ roomId, avatar, playerName, onLeave }: GameProps)
     const ctx = createScene(canvas)
     const world = createHubWorld()
     ctx.scene.add(world.group)
+    worldCollidersRef.current = world.colliders
+
+    const builder = createBuilder()
+    builderRef.current = builder
+    ctx.scene.add(builder.group)
 
     const myAvatar = createAvatar(avatar, playerName || undefined)
     ctx.scene.add(myAvatar.group)
@@ -75,6 +100,57 @@ export default function Game({ roomId, avatar, playerName, onLeave }: GameProps)
       () => chatFocusedRef.current,
     )
     addYawRef.current = addYaw
+
+    // Build mode key binding
+    function onBuildKey(e: KeyboardEvent) {
+      if (chatFocusedRef.current) return
+      if (e.code === 'KeyB') {
+        setBuildMode(prev => {
+          const next = !prev
+          builder.enabled = next
+          return next
+        })
+      }
+    }
+    window.addEventListener('keydown', onBuildKey)
+
+    // Block place/remove via mouse
+    function onMouseDown(e: MouseEvent) {
+      if (!builder.enabled || chatFocusedRef.current) return
+      if (e.button === 2) {
+        e.preventDefault()
+        const removed = removeBlock(builder, world.colliders)
+        if (removed) playRemoveSound()
+      }
+    }
+
+    function onMouseUp(e: MouseEvent) {
+      if (!builder.enabled || chatFocusedRef.current) return
+      if (e.button === 0 && document.pointerLockElement === canvas) {
+        const placed = placeBlock(builder, world.colliders)
+        if (placed) playPlaceSound()
+      }
+    }
+
+    function onContextMenu(e: Event) {
+      if (builder.enabled) e.preventDefault()
+    }
+
+    // Scroll to cycle colors
+    function onWheel(e: WheelEvent) {
+      if (!builder.enabled) return
+      e.preventDefault()
+      const dir = e.deltaY > 0 ? 1 : -1
+      const idx = BLOCK_COLORS.indexOf(builder.selectedColor)
+      const next = (idx + dir + BLOCK_COLORS.length) % BLOCK_COLORS.length
+      builder.selectedColor = BLOCK_COLORS[next]
+      setBuildColor(BLOCK_COLORS[next])
+    }
+
+    canvas.addEventListener('mousedown', onMouseDown)
+    canvas.addEventListener('mouseup', onMouseUp)
+    canvas.addEventListener('contextmenu', onContextMenu)
+    canvas.addEventListener('wheel', onWheel, { passive: false })
 
     const remotePlayers = new Map<string, { data: RemotePlayer; avatar: AvatarMesh }>()
 
@@ -165,6 +241,9 @@ export default function Game({ roomId, avatar, playerName, onLeave }: GameProps)
 
       updateCamera(ctx.camera, body, yaw, dt)
 
+      // Builder ghost
+      updateGhostBlock(builder, body.x, body.y, body.z, yaw)
+
       animateCoins(world, elapsed, dt)
       const collected = collectCoins(world, body.x, body.y, body.z)
       if (collected > 0) {
@@ -203,10 +282,16 @@ export default function Game({ roomId, avatar, playerName, onLeave }: GameProps)
       cleanupInput()
       mp.disconnect()
       window.removeEventListener('resize', onResize)
+      window.removeEventListener('keydown', onBuildKey)
+      canvas.removeEventListener('mousedown', onMouseDown)
+      canvas.removeEventListener('mouseup', onMouseUp)
+      canvas.removeEventListener('contextmenu', onContextMenu)
+      canvas.removeEventListener('wheel', onWheel)
       for (const [, remote] of remotePlayers) {
         disposeAvatar(remote.avatar)
       }
       disposeAvatar(myAvatar)
+      disposeBuilder(builder)
       disposeAllParticles(ctx.scene)
       disposeScene(ctx)
     }
@@ -256,10 +341,18 @@ export default function Game({ roomId, avatar, playerName, onLeave }: GameProps)
         Leave
       </button>
 
+      {/* Builder HUD */}
+      <BuilderHUD
+        enabled={buildMode}
+        selectedColor={buildColor}
+        onToggle={handleToggleBuild}
+        onSelectColor={handleSelectColor}
+      />
+
       {/* Controls hint (desktop only) */}
       {!showTouch && (
         <div className="absolute bottom-20 left-4 bg-black/40 backdrop-blur-sm rounded-lg px-3 py-2 text-white/60 text-xs">
-          WASD to move | Space to jump | Click to look around | Enter to chat
+          WASD move | Shift sprint | Space jump | B build | Click look | Enter chat
         </div>
       )}
 

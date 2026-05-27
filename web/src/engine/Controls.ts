@@ -9,17 +9,19 @@ export interface InputState {
   right: boolean
   jump: boolean
   jumpTrigger: boolean
+  sprint: boolean
   touchMoveX: number
   touchMoveZ: number
 }
 
 const MOVE_SPEED = 14
+const SPRINT_MULTIPLIER = 1.8
 const CAMERA_DISTANCE = 12
 const CAMERA_HEIGHT = 6
 const CAMERA_LERP = 5
 
 export function createInputState(): InputState {
-  return { forward: false, backward: false, left: false, right: false, jump: false, jumpTrigger: false, touchMoveX: 0, touchMoveZ: 0 }
+  return { forward: false, backward: false, left: false, right: false, jump: false, jumpTrigger: false, sprint: false, touchMoveX: 0, touchMoveZ: 0 }
 }
 
 export function bindInputListeners(
@@ -35,6 +37,7 @@ export function bindInputListeners(
       case 'KeyA': case 'ArrowLeft': input.left = true; break
       case 'KeyD': case 'ArrowRight': input.right = true; break
       case 'Space': input.jump = true; e.preventDefault(); break
+      case 'ShiftLeft': case 'ShiftRight': input.sprint = true; break
     }
   }
 
@@ -45,6 +48,7 @@ export function bindInputListeners(
       case 'KeyA': case 'ArrowLeft': input.left = false; break
       case 'KeyD': case 'ArrowRight': input.right = false; break
       case 'Space': input.jump = false; break
+      case 'ShiftLeft': case 'ShiftRight': input.sprint = false; break
     }
   }
 
@@ -116,9 +120,10 @@ export function applyInput(
   }
 
   const len = Math.sqrt(dx * dx + dz * dz)
+  const speed = MOVE_SPEED * (input.sprint ? SPRINT_MULTIPLIER : 1)
   if (len > 0) {
-    dx = (dx / len) * MOVE_SPEED
-    dz = (dz / len) * MOVE_SPEED
+    dx = (dx / len) * speed
+    dz = (dz / len) * speed
   }
 
   body.vx = dx

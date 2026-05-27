@@ -47,3 +47,13 @@ export function playLandSound() {
 export function playChatSound() {
   playTone(600, 0.05, 'sine', 0.06)
 }
+
+export function playPlaceSound() {
+  playTone(220, 0.06, 'square', 0.08)
+  setTimeout(() => playTone(330, 0.08, 'square', 0.06), 40)
+}
+
+export function playRemoveSound() {
+  playTone(330, 0.06, 'sawtooth', 0.06)
+  setTimeout(() => playTone(180, 0.1, 'sawtooth', 0.05), 40)
+}
