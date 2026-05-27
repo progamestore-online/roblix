@@ -19,7 +19,7 @@ export interface PhysicsBody {
 
 const GRAVITY = -25
 const TERMINAL_VELOCITY = -40
-const JUMP_VELOCITY = 10
+const JUMP_VELOCITY = 14
 
 export function createBody(x: number, y: number, z: number): PhysicsBody {
   return {
@@ -27,7 +27,7 @@ export function createBody(x: number, y: number, z: number): PhysicsBody {
     vx: 0, vy: 0, vz: 0,
     width: 1.4,
     height: 3.8,
-    depth: 0.8,
+    depth: 1.4,
     grounded: false,
   }
 }

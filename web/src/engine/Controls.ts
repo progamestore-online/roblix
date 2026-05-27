@@ -16,8 +16,9 @@ export interface InputState {
 
 const MOVE_SPEED = 14
 const SPRINT_MULTIPLIER = 1.8
-const CAMERA_DISTANCE = 12
-const CAMERA_HEIGHT = 6
+const CAMERA_DISTANCE = 14
+const CAMERA_DISTANCE_SPRINT = 18
+const CAMERA_HEIGHT = 7
 const CAMERA_LERP = 5
 
 export function createInputState(): InputState {
@@ -135,15 +136,20 @@ export function applyInput(
   }
 }
 
+let currentCamDist = CAMERA_DISTANCE
+
 export function updateCamera(
   camera: THREE.PerspectiveCamera,
   body: PhysicsBody,
   yaw: number,
   dt: number,
+  sprinting = false,
 ) {
-  const targetX = body.x - Math.sin(yaw) * CAMERA_DISTANCE
+  const targetDist = sprinting ? CAMERA_DISTANCE_SPRINT : CAMERA_DISTANCE
+  currentCamDist += (targetDist - currentCamDist) * 0.05
+  const targetX = body.x - Math.sin(yaw) * currentCamDist
   const targetY = body.y + CAMERA_HEIGHT
-  const targetZ = body.z - Math.cos(yaw) * CAMERA_DISTANCE
+  const targetZ = body.z - Math.cos(yaw) * currentCamDist
 
   const lerp = 1 - Math.exp(-CAMERA_LERP * dt)
   camera.position.x += (targetX - camera.position.x) * lerp

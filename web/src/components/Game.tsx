@@ -261,7 +261,7 @@ export default function Game({ roomId, avatar, playerName, onLeave }: GameProps)
       const speed = Math.sqrt(body.vx * body.vx + body.vz * body.vz)
       animateWalk(myAvatar, elapsed, speed, emoteRef.current)
 
-      updateCamera(ctx.camera, body, yaw, dt)
+      updateCamera(ctx.camera, body, yaw, dt, input.sprint && speed > 1)
       updateGhostBlock(builder, body.x, body.y, body.z, yaw)
 
       animateCoins(world, elapsed, dt)
