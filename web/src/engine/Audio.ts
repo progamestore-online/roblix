@@ -57,3 +57,40 @@ export function playRemoveSound() {
   playTone(330, 0.06, 'sawtooth', 0.06)
   setTimeout(() => playTone(180, 0.1, 'sawtooth', 0.05), 40)
 }
+
+export function playDeathSound() {
+  const ac = getCtx()
+  const osc = ac.createOscillator()
+  const gain = ac.createGain()
+  osc.type = 'sawtooth'
+  osc.frequency.setValueAtTime(440, ac.currentTime)
+  osc.frequency.exponentialRampToValueAtTime(60, ac.currentTime + 0.5)
+  gain.gain.setValueAtTime(0.18, ac.currentTime)
+  gain.gain.exponentialRampToValueAtTime(0.001, ac.currentTime + 0.55)
+  osc.connect(gain)
+  gain.connect(ac.destination)
+  osc.start()
+  osc.stop(ac.currentTime + 0.55)
+}
+
+export function playBounceSound() {
+  const ac = getCtx()
+  const osc = ac.createOscillator()
+  const gain = ac.createGain()
+  osc.type = 'sine'
+  osc.frequency.setValueAtTime(220, ac.currentTime)
+  osc.frequency.exponentialRampToValueAtTime(880, ac.currentTime + 0.15)
+  gain.gain.setValueAtTime(0.12, ac.currentTime)
+  gain.gain.exponentialRampToValueAtTime(0.001, ac.currentTime + 0.18)
+  osc.connect(gain)
+  gain.connect(ac.destination)
+  osc.start()
+  osc.stop(ac.currentTime + 0.18)
+}
+
+export function playFinishSound() {
+  playTone(523, 0.15, 'triangle', 0.18)
+  setTimeout(() => playTone(659, 0.15, 'triangle', 0.18), 130)
+  setTimeout(() => playTone(784, 0.15, 'triangle', 0.18), 260)
+  setTimeout(() => playTone(1047, 0.3, 'triangle', 0.18), 390)
+}

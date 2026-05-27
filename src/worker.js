@@ -12,8 +12,13 @@ function randomId() {
 }
 
 const WORLDS = [
-  { id: 'hub', name: 'Hub World', description: 'The main lobby — platforms, ramps, and collectible coins', maxPlayers: 32, thumbnail: null },
+  { id: 'hub', name: 'Hub World', description: 'The main lobby — platforms, ramps, and collectible coins', maxPlayers: 32, thumbnail: null, type: 'hub' },
+  { id: 'obby', name: 'Obby Course', description: 'Parkour obstacle course — jump your way to the top', maxPlayers: 16, thumbnail: null, type: 'obby' },
+  { id: 'sandbox', name: 'Sandbox', description: 'Flat creative world — build anything you want', maxPlayers: 8, thumbnail: null, type: 'sandbox' },
 ]
+
+const MAX_BLOCKS = 2000
+const VALID_BLOCK_TYPES = new Set(['solid', 'lava', 'bounce', 'ice', 'glass'])
 
 export class RoomDO extends DurableObject {
   constructor(state, env) {
@@ -21,12 +26,49 @@ export class RoomDO extends DurableObject {
     this.players = new Map()
     this.messages = []
     this.scores = new Map()
+    this.blocks = new Map()
+    this.obbyTimes = new Map() // playerId -> { name, time }
+    this.loaded = false
+  }
+
+  async loadState() {
+    if (this.loaded) return
+    this.loaded = true
+    const [storedBlocks, storedTimes] = await Promise.all([
+      this.ctx.storage.get('blocks'),
+      this.ctx.storage.get('obbyTimes'),
+    ])
+    if (storedBlocks) {
+      for (const [key, data] of Object.entries(storedBlocks)) {
+        // Backfill: older saved blocks lacked `blockType`; default to solid.
+        if (!data.blockType) data.blockType = 'solid'
+        this.blocks.set(key, data)
+      }
+    }
+    if (storedTimes) {
+      for (const [pid, data] of Object.entries(storedTimes)) {
+        this.obbyTimes.set(pid, data)
+      }
+    }
+  }
+
+  async saveBlocks() {
+    const obj = Object.fromEntries(this.blocks)
+    await this.ctx.storage.put('blocks', obj)
+  }
+
+  async saveObbyTimes() {
+    const obj = Object.fromEntries(this.obbyTimes)
+    await this.ctx.storage.put('obbyTimes', obj)
   }
 
   async fetch(req) {
     if (req.headers.get('Upgrade') !== 'websocket') {
       return new Response('Expected websocket', { status: 426 })
     }
+
+    await this.loadState()
+
     const pair = new WebSocketPair()
     const client = pair[0]
     const server = pair[1]
@@ -52,6 +94,8 @@ export class RoomDO extends DurableObject {
       players: Array.from(this.players.values()).filter(p => p.id !== playerId),
       messages: this.messages.slice(-50),
       leaderboard: this.getLeaderboard(),
+      blocks: Array.from(this.blocks.entries()).map(([key, data]) => ({ key, ...data })),
+      obbyTimes: this.getObbyTimes(),
     })
 
     this.broadcast({ type: 'player_joined', player: playerData }, server)
@@ -65,10 +109,19 @@ export class RoomDO extends DurableObject {
 
   getLeaderboard() {
     const entries = []
-    for (const [ws, player] of this.players) {
+    for (const [, player] of this.players) {
       entries.push({ id: player.id, name: player.name, coins: this.scores.get(player.id) || 0 })
     }
     entries.sort((a, b) => b.coins - a.coins)
+    return entries.slice(0, 10)
+  }
+
+  getObbyTimes() {
+    const entries = []
+    for (const [id, data] of this.obbyTimes) {
+      entries.push({ id, name: data.name, time: data.time })
+    }
+    entries.sort((a, b) => a.time - b.time)
     return entries.slice(0, 10)
   }
 
@@ -115,6 +168,49 @@ export class RoomDO extends DurableObject {
       const emote = ['wave', 'dance', 'sit', 'cheer'].includes(msg.emote) ? msg.emote : null
       player.emote = emote
       this.broadcast({ type: 'player_emote', id: player.id, emote })
+      return
+    }
+
+    if (msg.type === 'block_place') {
+      if (this.blocks.size >= MAX_BLOCKS) return
+      const { x, y, z, color, blockType } = msg
+      if (typeof x !== 'number' || typeof y !== 'number' || typeof z !== 'number') return
+      const key = `${x},${y},${z}`
+      if (this.blocks.has(key)) return
+      const safeType = VALID_BLOCK_TYPES.has(blockType) ? blockType : 'solid'
+      const safeColor = typeof color === 'number' ? color : 0x1e88e5
+      this.blocks.set(key, { x, y, z, color: safeColor, blockType: safeType })
+      this.broadcast({ type: 'block_placed', x, y, z, color: safeColor, blockType: safeType }, ws)
+      this.saveBlocks()
+      return
+    }
+
+    if (msg.type === 'block_remove') {
+      const { x, y, z } = msg
+      const key = `${x},${y},${z}`
+      if (!this.blocks.has(key)) return
+      this.blocks.delete(key)
+      this.broadcast({ type: 'block_removed', x, y, z }, ws)
+      this.saveBlocks()
+      return
+    }
+
+    if (msg.type === 'obby_finish') {
+      const time = Number(msg.time)
+      if (!Number.isFinite(time) || time <= 0 || time > 600) return
+      const existing = this.obbyTimes.get(player.id)
+      if (!existing || time < existing.time) {
+        this.obbyTimes.set(player.id, { name: player.name, time })
+        this.broadcast({ type: 'obby_times', obbyTimes: this.getObbyTimes() })
+        this.saveObbyTimes()
+        const chatMsg = {
+          id: randomId(), playerId: player.id, name: 'system',
+          text: `🏁 ${player.name} finished in ${time.toFixed(2)}s${!existing ? '' : ' (new PB!)'}`,
+          timestamp: Date.now(),
+        }
+        this.messages.push(chatMsg)
+        this.broadcast({ type: 'chat', message: chatMsg })
+      }
       return
     }
   }

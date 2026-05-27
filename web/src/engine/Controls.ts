@@ -16,6 +16,7 @@ export interface InputState {
 
 const MOVE_SPEED = 14
 const SPRINT_MULTIPLIER = 1.8
+const ICE_MULTIPLIER = 1.6
 const CAMERA_DISTANCE = 14
 const CAMERA_DISTANCE_SPRINT = 18
 const CAMERA_HEIGHT = 7
@@ -121,14 +122,23 @@ export function applyInput(
   }
 
   const len = Math.sqrt(dx * dx + dz * dz)
-  const speed = MOVE_SPEED * (input.sprint ? SPRINT_MULTIPLIER : 1)
+  const speed = MOVE_SPEED
+    * (input.sprint ? SPRINT_MULTIPLIER : 1)
+    * (body.onIce ? ICE_MULTIPLIER : 1)
   if (len > 0) {
     dx = (dx / len) * speed
     dz = (dz / len) * speed
   }
 
-  body.vx = dx
-  body.vz = dz
+  // On ice, blend toward intended velocity (sliding feel). Off ice, direct control.
+  if (body.onIce) {
+    const blend = 0.08
+    body.vx = body.vx * (1 - blend) + dx * blend
+    body.vz = body.vz * (1 - blend) + dz * blend
+  } else {
+    body.vx = dx
+    body.vz = dz
+  }
 
   if (input.jump || input.jumpTrigger) {
     jump(body)
@@ -144,7 +154,18 @@ export function updateCamera(
   yaw: number,
   dt: number,
   sprinting = false,
+  firstPerson = false,
 ) {
+  if (firstPerson) {
+    // Snap to eye position (no smoothing — would feel laggy in FP).
+    camera.position.set(body.x, body.y + 3.4, body.z)
+    camera.lookAt(
+      body.x + Math.sin(yaw) * 4,
+      body.y + 3.4,
+      body.z + Math.cos(yaw) * 4,
+    )
+    return
+  }
   const targetDist = sprinting ? CAMERA_DISTANCE_SPRINT : CAMERA_DISTANCE
   currentCamDist += (targetDist - currentCamDist) * 0.05
   const targetX = body.x - Math.sin(yaw) * currentCamDist

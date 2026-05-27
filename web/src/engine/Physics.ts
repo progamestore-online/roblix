@@ -1,7 +1,10 @@
+export type BlockType = 'solid' | 'lava' | 'bounce' | 'ice' | 'glass'
+
 export interface AABB {
   minX: number; maxX: number
   minY: number; maxY: number
   minZ: number; maxZ: number
+  type?: BlockType
 }
 
 export interface PhysicsBody {
@@ -15,11 +18,14 @@ export interface PhysicsBody {
   height: number
   depth: number
   grounded: boolean
+  killed: boolean
+  onIce: boolean
 }
 
 const GRAVITY = -25
 const TERMINAL_VELOCITY = -40
 const JUMP_VELOCITY = 14
+const BOUNCE_VELOCITY = 22
 
 export function createBody(x: number, y: number, z: number): PhysicsBody {
   return {
@@ -29,6 +35,8 @@ export function createBody(x: number, y: number, z: number): PhysicsBody {
     height: 3.8,
     depth: 1.4,
     grounded: false,
+    killed: false,
+    onIce: false,
   }
 }
 
@@ -68,15 +76,25 @@ export function stepPhysics(body: PhysicsBody, dt: number, colliders: AABB[]) {
   // Move Y and resolve
   body.y += body.vy * dt
   body.grounded = false
+  body.onIce = false
 
   const bodyAABB = getAABB(body)
   for (const col of colliders) {
     if (aabbIntersects(bodyAABB, col)) {
+      if (col.type === 'lava') {
+        body.killed = true
+      }
       if (body.vy <= 0) {
         // Landing on top
         body.y = col.maxY
-        body.vy = 0
-        body.grounded = true
+        if (col.type === 'bounce') {
+          body.vy = BOUNCE_VELOCITY
+          body.grounded = false
+        } else {
+          body.vy = 0
+          body.grounded = true
+          if (col.type === 'ice') body.onIce = true
+        }
       } else {
         // Hit ceiling
         body.y = col.minY - body.height
@@ -93,6 +111,7 @@ export function stepPhysics(body: PhysicsBody, dt: number, colliders: AABB[]) {
   const afterX = getAABB(body)
   for (const col of colliders) {
     if (aabbIntersects(afterX, col)) {
+      if (col.type === 'lava') body.killed = true
       if (body.vx > 0) {
         body.x = col.minX - body.width / 2
       } else {
@@ -108,6 +127,7 @@ export function stepPhysics(body: PhysicsBody, dt: number, colliders: AABB[]) {
   const afterZ = getAABB(body)
   for (const col of colliders) {
     if (aabbIntersects(afterZ, col)) {
+      if (col.type === 'lava') body.killed = true
       if (body.vz > 0) {
         body.z = col.minZ - body.depth / 2
       } else {
@@ -120,11 +140,18 @@ export function stepPhysics(body: PhysicsBody, dt: number, colliders: AABB[]) {
 
   // Prevent falling through the void
   if (body.y < -50) {
-    body.x = 0
-    body.y = 10
-    body.z = 0
-    body.vx = 0
-    body.vy = 0
-    body.vz = 0
+    body.killed = true
   }
+}
+
+export function respawnBody(body: PhysicsBody, x: number, y: number, z: number) {
+  body.x = x
+  body.y = y
+  body.z = z
+  body.vx = 0
+  body.vy = 0
+  body.vz = 0
+  body.grounded = false
+  body.killed = false
+  body.onIce = false
 }

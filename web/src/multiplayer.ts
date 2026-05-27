@@ -23,8 +23,25 @@ export interface LeaderboardEntry {
   coins: number
 }
 
+export type BlockKind = 'solid' | 'lava' | 'bounce' | 'ice' | 'glass'
+
+export interface BlockState {
+  key: string
+  x: number
+  y: number
+  z: number
+  color: number
+  blockType: BlockKind
+}
+
+export interface ObbyFinish {
+  id: string
+  name: string
+  time: number
+}
+
 export type ServerMessage =
-  | { type: 'init'; playerId: string; players: RemotePlayer[]; messages: ChatMessage[]; leaderboard: LeaderboardEntry[] }
+  | { type: 'init'; playerId: string; players: RemotePlayer[]; messages: ChatMessage[]; leaderboard: LeaderboardEntry[]; blocks: BlockState[]; obbyTimes: ObbyFinish[] }
   | { type: 'player_joined'; player: RemotePlayer }
   | { type: 'player_left'; id: string }
   | { type: 'player_moved'; id: string; position: { x: number; y: number; z: number }; rotation: { y: number } }
@@ -32,6 +49,9 @@ export type ServerMessage =
   | { type: 'player_emote'; id: string; emote: string | null }
   | { type: 'chat'; message: ChatMessage }
   | { type: 'leaderboard'; leaderboard: LeaderboardEntry[] }
+  | { type: 'block_placed'; x: number; y: number; z: number; color: number; blockType: BlockKind }
+  | { type: 'block_removed'; x: number; y: number; z: number }
+  | { type: 'obby_times'; obbyTimes: ObbyFinish[] }
 
 export interface MultiplayerClient {
   connect(roomId: string): void
@@ -41,6 +61,9 @@ export interface MultiplayerClient {
   sendAvatarUpdate(avatar: AvatarColors, name: string): void
   sendCoinCollected(count: number): void
   sendEmote(emote: string): void
+  sendBlockPlace(x: number, y: number, z: number, color: number, blockType: BlockKind): void
+  sendBlockRemove(x: number, y: number, z: number): void
+  sendObbyFinish(time: number): void
   onMessage(handler: (msg: ServerMessage) => void): void
   isConnected(): boolean
 }
@@ -85,6 +108,9 @@ export function createMultiplayerClient(): MultiplayerClient {
   function sendAvatarUpdate(avatar: AvatarColors, name: string) { send({ type: 'avatar_update', avatar, name }) }
   function sendCoinCollected(count: number) { send({ type: 'coin_collected', count }) }
   function sendEmote(emote: string) { send({ type: 'emote', emote }) }
+  function sendBlockPlace(x: number, y: number, z: number, color: number, blockType: BlockKind) { send({ type: 'block_place', x, y, z, color, blockType }) }
+  function sendBlockRemove(x: number, y: number, z: number) { send({ type: 'block_remove', x, y, z }) }
+  function sendObbyFinish(time: number) { send({ type: 'obby_finish', time }) }
 
   function send(msg: unknown) {
     if (ws && ws.readyState === WebSocket.OPEN) {
@@ -95,5 +121,5 @@ export function createMultiplayerClient(): MultiplayerClient {
   function onMessage(h: (msg: ServerMessage) => void) { handler = h }
   function isConnected() { return connected }
 
-  return { connect, disconnect, sendPosition, sendChat, sendAvatarUpdate, sendCoinCollected, sendEmote, onMessage, isConnected }
+  return { connect, disconnect, sendPosition, sendChat, sendAvatarUpdate, sendCoinCollected, sendEmote, sendBlockPlace, sendBlockRemove, sendObbyFinish, onMessage, isConnected }
 }

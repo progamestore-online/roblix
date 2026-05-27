@@ -3,15 +3,20 @@ import type { AvatarColors } from '../App.tsx'
 import { createScene, resizeScene, disposeScene, updateScene } from '../engine/Scene.ts'
 import { createAvatar, animateWalk, disposeAvatar } from '../engine/Avatar.ts'
 import type { AvatarMesh } from '../engine/Avatar.ts'
-import { createBody, stepPhysics } from '../engine/Physics.ts'
+import { createBody, stepPhysics, respawnBody } from '../engine/Physics.ts'
+import type { BlockType } from '../engine/Physics.ts'
 import { createInputState, bindInputListeners, applyInput, updateCamera } from '../engine/Controls.ts'
 import { createHubWorld, animateCoins, collectCoins } from '../engine/World.ts'
-import { createBuilder, updateGhostBlock, placeBlock, removeBlock, setBuilderColor, disposeBuilder, BLOCK_COLORS } from '../engine/Builder.ts'
+import { createObbyWorld, createSandboxWorld } from '../engine/Worlds.ts'
+import { createBuilder, updateGhostBlock, placeBlock, removeBlock, setBuilderColor, setBuilderType, disposeBuilder, tickBlockAnimations, BLOCK_COLORS, BLOCK_TYPES, addBlockFromServer, removeBlockFromServer } from '../engine/Builder.ts'
 import type { BuilderState } from '../engine/Builder.ts'
 import { spawnCoinParticles, updateParticles, disposeAllParticles } from '../engine/Particles.ts'
-import { playCoinSound, playJumpSound, playLandSound, playChatSound, playPlaceSound, playRemoveSound } from '../engine/Audio.ts'
+import {
+  playCoinSound, playJumpSound, playLandSound, playChatSound,
+  playPlaceSound, playRemoveSound, playDeathSound, playBounceSound, playFinishSound,
+} from '../engine/Audio.ts'
 import { createMultiplayerClient } from '../multiplayer.ts'
-import type { RemotePlayer, ChatMessage, ServerMessage, LeaderboardEntry } from '../multiplayer.ts'
+import type { RemotePlayer, ChatMessage, ServerMessage, LeaderboardEntry, ObbyFinish } from '../multiplayer.ts'
 import Chat from './Chat.tsx'
 import TouchControls from './TouchControls.tsx'
 import BuilderHUD from './BuilderHUD.tsx'
@@ -38,9 +43,19 @@ export default function Game({ roomId, avatar, playerName, onLeave }: GameProps)
   const [showTouch] = useState(isTouchDevice)
   const [buildMode, setBuildMode] = useState(false)
   const [buildColor, setBuildColor] = useState(BLOCK_COLORS[5])
+  const [buildType, setBuildType] = useState<BlockType>('solid')
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([])
+  const [obbyTimes, setObbyTimes] = useState<ObbyFinish[]>([])
   const [myPlayerId, setMyPlayerId] = useState<string | null>(null)
   const [activeEmote, setActiveEmote] = useState<string | null>(null)
+  const [firstPerson, setFirstPerson] = useState(false)
+  const [obbyTimeMs, setObbyTimeMs] = useState<number | null>(null)
+  const [obbyBest, setObbyBest] = useState<number | null>(() => {
+    const v = Number(localStorage.getItem('roblix-obby-best') || 'NaN')
+    return Number.isFinite(v) && v > 0 ? v : null
+  })
+  const [respawnFlash, setRespawnFlash] = useState(false)
+  const firstPersonRef = useRef(false)
   const chatFocusedRef = useRef(false)
   const inputRef = useRef(createInputState())
   const addYawRef = useRef<(delta: number) => void>(() => {})
@@ -51,6 +66,10 @@ export default function Game({ roomId, avatar, playerName, onLeave }: GameProps)
   useEffect(() => {
     chatFocusedRef.current = chatFocused
   }, [chatFocused])
+
+  useEffect(() => {
+    firstPersonRef.current = firstPerson
+  }, [firstPerson])
 
   const mpRef = useRef<ReturnType<typeof createMultiplayerClient> | null>(null)
 
@@ -80,13 +99,26 @@ export default function Game({ roomId, avatar, playerName, onLeave }: GameProps)
     if (builderRef.current) setBuilderColor(builderRef.current, color)
   }, [])
 
+  const handleSelectType = useCallback((type: BlockType) => {
+    setBuildType(type)
+    if (builderRef.current) setBuilderType(builderRef.current, type)
+  }, [])
+
   useEffect(() => {
     const canvas = canvasRef.current
     if (!canvas) return
 
     const ctx = createScene(canvas)
-    const world = createHubWorld()
+    const world =
+      roomId === 'hub' ? createHubWorld() :
+      roomId === 'obby' ? createObbyWorld() :
+      roomId === 'sandbox' ? createSandboxWorld() :
+      createSandboxWorld()
     ctx.scene.add(world.group)
+
+    const spawn = { x: 0, y: 2, z: 0 }
+    // Obby victory platform footprint (from Worlds.ts createObbyWorld).
+    const OBBY_FINISH = { x: -8, y: 29, z: 6, w: 6, d: 6 }
 
     const builder = createBuilder()
     builderRef.current = builder
@@ -95,8 +127,11 @@ export default function Game({ roomId, avatar, playerName, onLeave }: GameProps)
     const myAvatar = createAvatar(avatar, playerName || undefined)
     ctx.scene.add(myAvatar.group)
 
-    const body = createBody(0, 2, 0)
+    const body = createBody(spawn.x, spawn.y, spawn.z)
     const input = inputRef.current
+    // Obby timer starts lazily once the player leaves the start platform.
+    let obbyStart: number | null = null
+    let obbyFinished = false
 
     const { cleanup: cleanupInput, getYaw, addYaw } = bindInputListeners(
       input,
@@ -114,6 +149,21 @@ export default function Game({ roomId, avatar, playerName, onLeave }: GameProps)
           builder.enabled = next
           return next
         })
+      }
+      if (e.code === 'KeyT' && builder.enabled) {
+        const idx = BLOCK_TYPES.indexOf(builder.selectedType)
+        const next = BLOCK_TYPES[(idx + 1) % BLOCK_TYPES.length]
+        builder.selectedType = next
+        setBuildType(next)
+      }
+      if (e.code === 'KeyV') {
+        setFirstPerson(prev => !prev)
+      }
+      if (e.code === 'KeyR' && roomId === 'obby') {
+        respawnBody(body, spawn.x, spawn.y, spawn.z)
+        obbyStart = null
+        obbyFinished = false
+        setObbyTimeMs(null)
       }
       // Emotes: 1-4
       const emoteMap: Record<string, string> = {
@@ -135,13 +185,21 @@ export default function Game({ roomId, avatar, playerName, onLeave }: GameProps)
       if (!builder.enabled || chatFocusedRef.current) return
       if (e.button === 2) {
         e.preventDefault()
-        if (removeBlock(builder, world.colliders)) playRemoveSound()
+        const removed = removeBlock(builder, world.colliders)
+        if (removed) {
+          playRemoveSound()
+          mpRef.current?.sendBlockRemove(removed.x, removed.y, removed.z)
+        }
       }
     }
     function onMouseUp(e: MouseEvent) {
       if (!builder.enabled || chatFocusedRef.current) return
       if (e.button === 0 && document.pointerLockElement === canvas) {
-        if (placeBlock(builder, world.colliders)) playPlaceSound()
+        const placed = placeBlock(builder, world.colliders)
+        if (placed) {
+          playPlaceSound()
+          mpRef.current?.sendBlockPlace(placed.x, placed.y, placed.z, placed.color, placed.type)
+        }
       }
     }
     function onContextMenu(e: Event) {
@@ -168,6 +226,8 @@ export default function Game({ roomId, avatar, playerName, onLeave }: GameProps)
     mpRef.current = mp
 
     let prevGrounded = true
+    let prevVy = 0
+    let timerUiAccum = 0
 
     mp.onMessage((msg: ServerMessage) => {
       if (msg.type === 'init') {
@@ -176,6 +236,18 @@ export default function Game({ roomId, avatar, playerName, onLeave }: GameProps)
         setMessages(msg.messages)
         setPlayerCount(msg.players.length + 1)
         setLeaderboard(msg.leaderboard)
+        setObbyTimes(msg.obbyTimes)
+        for (const b of msg.blocks) {
+          addBlockFromServer(builder, world.colliders, b.x, b.y, b.z, b.color, b.blockType)
+        }
+      } else if (msg.type === 'block_placed') {
+        addBlockFromServer(builder, world.colliders, msg.x, msg.y, msg.z, msg.color, msg.blockType)
+        playPlaceSound()
+      } else if (msg.type === 'block_removed') {
+        removeBlockFromServer(builder, world.colliders, msg.x, msg.y, msg.z)
+        playRemoveSound()
+      } else if (msg.type === 'obby_times') {
+        setObbyTimes(msg.obbyTimes)
       } else if (msg.type === 'player_joined') {
         addRemotePlayer(msg.player)
         setPlayerCount(remotePlayers.size + 1)
@@ -250,21 +322,71 @@ export default function Game({ roomId, avatar, playerName, onLeave }: GameProps)
       if (wantsJump) playJumpSound()
 
       applyInput(input, body, yaw)
+      prevVy = body.vy
       stepPhysics(body, dt, world.colliders)
+
+      // Bounce sound: was falling, now launched up by a bounce block.
+      if (prevVy < 0 && body.vy > 10) playBounceSound()
+
+      if (body.killed) {
+        playDeathSound()
+        respawnBody(body, spawn.x, spawn.y, spawn.z)
+        if (roomId === 'obby') {
+          obbyStart = null
+          obbyFinished = false
+          setObbyTimeMs(null)
+        }
+        setRespawnFlash(true)
+        window.setTimeout(() => setRespawnFlash(false), 250)
+      }
 
       if (!prevGrounded && body.grounded) playLandSound()
       prevGrounded = body.grounded
 
+      // Obby timer: start when player moves off the start platform, stop on finish.
+      if (roomId === 'obby' && !obbyFinished) {
+        if (obbyStart === null && (body.x * body.x + body.z * body.z) > 16) {
+          obbyStart = performance.now()
+        }
+        if (obbyStart !== null) {
+          const ms = performance.now() - obbyStart
+          timerUiAccum += dt
+          if (timerUiAccum > 0.05) {
+            timerUiAccum = 0
+            setObbyTimeMs(ms)
+          }
+          const dx = Math.abs(body.x - OBBY_FINISH.x)
+          const dz = Math.abs(body.z - OBBY_FINISH.z)
+          if (dx < OBBY_FINISH.w / 2 && dz < OBBY_FINISH.d / 2 && body.y >= OBBY_FINISH.y) {
+            obbyFinished = true
+            const time = ms / 1000
+            setObbyTimeMs(ms)
+            playFinishSound()
+            spawnCoinParticles(ctx.scene, body.x, body.y + 1.5, body.z)
+            mp.sendObbyFinish(time)
+            setObbyBest(prev => {
+              if (prev === null || time < prev) {
+                localStorage.setItem('roblix-obby-best', String(time))
+                return time
+              }
+              return prev
+            })
+          }
+        }
+      }
+
       myAvatar.group.position.set(body.x, body.y, body.z)
       myAvatar.group.rotation.y = yaw
+      myAvatar.group.visible = !firstPersonRef.current
 
       const speed = Math.sqrt(body.vx * body.vx + body.vz * body.vz)
       animateWalk(myAvatar, elapsed, speed, emoteRef.current)
 
-      updateCamera(ctx.camera, body, yaw, dt, input.sprint && speed > 1)
+      updateCamera(ctx.camera, body, yaw, dt, input.sprint && speed > 1, firstPersonRef.current)
       updateGhostBlock(builder, body.x, body.y, body.z, yaw)
 
       animateCoins(world, elapsed, dt)
+      tickBlockAnimations(elapsed)
       const collected = collectCoins(world, body.x, body.y, body.z)
       if (collected > 0) {
         totalCoins += collected
@@ -322,6 +444,10 @@ export default function Game({ roomId, avatar, playerName, onLeave }: GameProps)
     <div className="relative w-full h-full">
       <canvas ref={canvasRef} className="w-full h-full block" />
 
+      {respawnFlash && (
+        <div className="absolute inset-0 bg-red-500/40 pointer-events-none" />
+      )}
+
       {/* HUD */}
       <div className="absolute top-4 left-4 flex flex-col gap-2" data-ui>
         <div className="bg-black/60 backdrop-blur-sm rounded-lg px-4 py-2 text-white text-sm flex items-center gap-2">
@@ -331,6 +457,18 @@ export default function Game({ roomId, avatar, playerName, onLeave }: GameProps)
         <div className="bg-black/60 backdrop-blur-sm rounded-lg px-4 py-2 text-white text-sm">
           <span className="text-indigo-300 font-bold">{playerCount}</span> online
         </div>
+        {roomId === 'obby' && (
+          <div className="bg-black/60 backdrop-blur-sm rounded-lg px-4 py-2 text-white text-sm font-mono flex flex-col gap-0.5 min-w-32">
+            <div className="flex justify-between gap-3">
+              <span className="text-white/60">Time</span>
+              <span className="text-emerald-300 font-bold">{obbyTimeMs === null ? '—' : (obbyTimeMs / 1000).toFixed(2) + 's'}</span>
+            </div>
+            <div className="flex justify-between gap-3">
+              <span className="text-white/60">Best</span>
+              <span className="text-yellow-300">{obbyBest === null ? '—' : obbyBest.toFixed(2) + 's'}</span>
+            </div>
+          </div>
+        )}
         {activeEmote && (
           <div className="bg-black/60 backdrop-blur-sm rounded-lg px-4 py-2 text-white text-sm">
             {activeEmote === 'wave' ? '👋' : activeEmote === 'dance' ? '💃' : activeEmote === 'sit' ? '🪑' : '🎉'} {activeEmote}
@@ -370,14 +508,35 @@ export default function Game({ roomId, avatar, playerName, onLeave }: GameProps)
       <BuilderHUD
         enabled={buildMode}
         selectedColor={buildColor}
+        selectedType={buildType}
         onToggle={handleToggleBuild}
         onSelectColor={handleSelectColor}
+        onSelectType={handleSelectType}
       />
 
       {/* Controls hint (desktop only) */}
       {!showTouch && (
         <div className="absolute bottom-20 left-4 bg-black/40 backdrop-blur-sm rounded-lg px-3 py-2 text-white/60 text-xs">
-          WASD move | Shift sprint | Space jump | B build | 1-4 emotes | Enter chat
+          WASD move | Shift sprint | Space jump | B build | T type | V {firstPerson ? '3rd person' : '1st person'}{roomId === 'obby' ? ' | R reset' : ''} | 1-4 emotes | Enter chat
+        </div>
+      )}
+
+      {/* Obby finish times */}
+      {roomId === 'obby' && obbyTimes.length > 0 && (
+        <div className="absolute top-24 left-4 bg-black/60 backdrop-blur-sm rounded-lg px-3 py-2 w-44" data-ui>
+          <div className="text-white/70 text-xs font-semibold mb-1 uppercase tracking-wider">Best Times</div>
+          {obbyTimes.slice(0, 5).map((entry, i) => (
+            <div
+              key={entry.id}
+              className={`flex items-center gap-2 text-xs py-0.5 ${
+                entry.id === myPlayerId ? 'text-yellow-300 font-bold' : 'text-white/80'
+              }`}
+            >
+              <span className="w-4 text-right text-white/40">{i + 1}.</span>
+              <span className="flex-1 truncate">{entry.name || 'Player'}</span>
+              <span className="text-green-400">{entry.time.toFixed(2)}s</span>
+            </div>
+          ))}
         </div>
       )}
 

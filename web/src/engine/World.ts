@@ -8,6 +8,8 @@ export interface WorldData {
   coinMeshes: THREE.Mesh[]
   coinRespawnTimers: number[]
   water: THREE.Mesh | null
+  spawn: { x: number; y: number; z: number }
+  obby?: { finishCenter: THREE.Vector3; finishRadius: number }
 }
 
 const COIN_RESPAWN_TIME = 15
@@ -320,7 +322,10 @@ export function createHubWorld(): WorldData {
     })
   }
 
-  return { group, colliders, coinPositions, coinMeshes, coinRespawnTimers, water }
+  return {
+    group, colliders, coinPositions, coinMeshes, coinRespawnTimers, water,
+    spawn: { x: 0, y: 2, z: 0 },
+  }
 }
 
 function addBox(
