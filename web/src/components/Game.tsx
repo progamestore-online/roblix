@@ -501,8 +501,8 @@ export default function Game({ roomId, avatar, playerName, onLeave }: GameProps)
         Leave
       </button>
 
-      {/* Leaderboard */}
-      <Leaderboard entries={leaderboard} myId={myPlayerId} />
+      {/* Coin leaderboard — hidden in obby (which has its own time leaderboard) */}
+      {roomId !== 'obby' && <Leaderboard entries={leaderboard} myId={myPlayerId} />}
 
       {/* Builder HUD */}
       <BuilderHUD
