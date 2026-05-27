@@ -11,10 +11,11 @@ import type { BuilderState } from '../engine/Builder.ts'
 import { spawnCoinParticles, updateParticles, disposeAllParticles } from '../engine/Particles.ts'
 import { playCoinSound, playJumpSound, playLandSound, playChatSound, playPlaceSound, playRemoveSound } from '../engine/Audio.ts'
 import { createMultiplayerClient } from '../multiplayer.ts'
-import type { RemotePlayer, ChatMessage, ServerMessage } from '../multiplayer.ts'
+import type { RemotePlayer, ChatMessage, ServerMessage, LeaderboardEntry } from '../multiplayer.ts'
 import Chat from './Chat.tsx'
 import TouchControls from './TouchControls.tsx'
 import BuilderHUD from './BuilderHUD.tsx'
+import Leaderboard from './Leaderboard.tsx'
 
 interface GameProps {
   roomId: string
@@ -37,11 +38,15 @@ export default function Game({ roomId, avatar, playerName, onLeave }: GameProps)
   const [showTouch] = useState(isTouchDevice)
   const [buildMode, setBuildMode] = useState(false)
   const [buildColor, setBuildColor] = useState(BLOCK_COLORS[5])
+  const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([])
+  const [myPlayerId, setMyPlayerId] = useState<string | null>(null)
+  const [activeEmote, setActiveEmote] = useState<string | null>(null)
   const chatFocusedRef = useRef(false)
   const inputRef = useRef(createInputState())
   const addYawRef = useRef<(delta: number) => void>(() => {})
   const builderRef = useRef<BuilderState | null>(null)
-  const worldCollidersRef = useRef<import('../engine/Physics.ts').AABB[]>([])
+  const emoteRef = useRef<string | null>(null)
+  const remoteEmotes = useRef<Map<string, string | null>>(new Map())
 
   useEffect(() => {
     chatFocusedRef.current = chatFocused
@@ -82,7 +87,6 @@ export default function Game({ roomId, avatar, playerName, onLeave }: GameProps)
     const ctx = createScene(canvas)
     const world = createHubWorld()
     ctx.scene.add(world.group)
-    worldCollidersRef.current = world.colliders
 
     const builder = createBuilder()
     builderRef.current = builder
@@ -101,8 +105,8 @@ export default function Game({ roomId, avatar, playerName, onLeave }: GameProps)
     )
     addYawRef.current = addYaw
 
-    // Build mode key binding
-    function onBuildKey(e: KeyboardEvent) {
+    // Key bindings for build mode + emotes
+    function onGameKey(e: KeyboardEvent) {
       if (chatFocusedRef.current) return
       if (e.code === 'KeyB') {
         setBuildMode(prev => {
@@ -111,32 +115,38 @@ export default function Game({ roomId, avatar, playerName, onLeave }: GameProps)
           return next
         })
       }
+      // Emotes: 1-4
+      const emoteMap: Record<string, string> = {
+        'Digit1': 'wave', 'Digit2': 'dance', 'Digit3': 'sit', 'Digit4': 'cheer',
+      }
+      if (emoteMap[e.code]) {
+        const em = emoteMap[e.code]
+        const current = emoteRef.current
+        const next = current === em ? null : em
+        emoteRef.current = next
+        setActiveEmote(next)
+        mpRef.current?.sendEmote(next || '')
+      }
     }
-    window.addEventListener('keydown', onBuildKey)
+    window.addEventListener('keydown', onGameKey)
 
-    // Block place/remove via mouse
+    // Block place/remove
     function onMouseDown(e: MouseEvent) {
       if (!builder.enabled || chatFocusedRef.current) return
       if (e.button === 2) {
         e.preventDefault()
-        const removed = removeBlock(builder, world.colliders)
-        if (removed) playRemoveSound()
+        if (removeBlock(builder, world.colliders)) playRemoveSound()
       }
     }
-
     function onMouseUp(e: MouseEvent) {
       if (!builder.enabled || chatFocusedRef.current) return
       if (e.button === 0 && document.pointerLockElement === canvas) {
-        const placed = placeBlock(builder, world.colliders)
-        if (placed) playPlaceSound()
+        if (placeBlock(builder, world.colliders)) playPlaceSound()
       }
     }
-
     function onContextMenu(e: Event) {
       if (builder.enabled) e.preventDefault()
     }
-
-    // Scroll to cycle colors
     function onWheel(e: WheelEvent) {
       if (!builder.enabled) return
       e.preventDefault()
@@ -161,14 +171,17 @@ export default function Game({ roomId, avatar, playerName, onLeave }: GameProps)
 
     mp.onMessage((msg: ServerMessage) => {
       if (msg.type === 'init') {
+        setMyPlayerId(msg.playerId)
         for (const p of msg.players) addRemotePlayer(p)
         setMessages(msg.messages)
         setPlayerCount(msg.players.length + 1)
+        setLeaderboard(msg.leaderboard)
       } else if (msg.type === 'player_joined') {
         addRemotePlayer(msg.player)
         setPlayerCount(remotePlayers.size + 1)
       } else if (msg.type === 'player_left') {
         removeRemotePlayer(msg.id)
+        remoteEmotes.current.delete(msg.id)
         setPlayerCount(remotePlayers.size + 1)
       } else if (msg.type === 'player_moved') {
         const remote = remotePlayers.get(msg.id)
@@ -182,9 +195,13 @@ export default function Game({ roomId, avatar, playerName, onLeave }: GameProps)
           remote.data.avatar = msg.avatar
           remote.data.name = msg.name
         }
+      } else if (msg.type === 'player_emote') {
+        remoteEmotes.current.set(msg.id, msg.emote)
       } else if (msg.type === 'chat') {
         setMessages(prev => [...prev.slice(-49), msg.message])
         playChatSound()
+      } else if (msg.type === 'leaderboard') {
+        setLeaderboard(msg.leaderboard)
       }
     })
 
@@ -222,26 +239,29 @@ export default function Game({ roomId, avatar, playerName, onLeave }: GameProps)
       const elapsed = ctx.clock.getElapsedTime()
       const yaw = getYaw()
 
+      // Clear emote on movement
+      if (emoteRef.current && (input.forward || input.backward || input.left || input.right || input.jump)) {
+        emoteRef.current = null
+        setActiveEmote(null)
+        mp.sendEmote('')
+      }
+
       const wantsJump = (input.jump || input.jumpTrigger) && body.grounded
       if (wantsJump) playJumpSound()
 
       applyInput(input, body, yaw)
       stepPhysics(body, dt, world.colliders)
 
-      if (!prevGrounded && body.grounded) {
-        playLandSound()
-      }
+      if (!prevGrounded && body.grounded) playLandSound()
       prevGrounded = body.grounded
 
       myAvatar.group.position.set(body.x, body.y, body.z)
       myAvatar.group.rotation.y = yaw
 
       const speed = Math.sqrt(body.vx * body.vx + body.vz * body.vz)
-      animateWalk(myAvatar, elapsed, speed)
+      animateWalk(myAvatar, elapsed, speed, emoteRef.current)
 
       updateCamera(ctx.camera, body, yaw, dt)
-
-      // Builder ghost
       updateGhostBlock(builder, body.x, body.y, body.z, yaw)
 
       animateCoins(world, elapsed, dt)
@@ -251,6 +271,7 @@ export default function Game({ roomId, avatar, playerName, onLeave }: GameProps)
         setCoins(totalCoins)
         playCoinSound()
         spawnCoinParticles(ctx.scene, body.x, body.y + 1.5, body.z)
+        mp.sendCoinCollected(collected)
       }
 
       updateParticles(ctx.scene, dt)
@@ -263,15 +284,13 @@ export default function Game({ roomId, avatar, playerName, onLeave }: GameProps)
         g.position.z += (target.z - g.position.z) * 0.15
         g.rotation.y += (remote.data.rotation.y - g.rotation.y) * 0.15
         const rSpeed = Math.abs(target.x - g.position.x) + Math.abs(target.z - g.position.z)
-        animateWalk(remote.avatar, elapsed, rSpeed)
+        const rEmote = remoteEmotes.current.get(remote.data.id) ?? null
+        animateWalk(remote.avatar, elapsed, rSpeed, rEmote)
       }
 
-      mp.sendPosition(
-        { x: body.x, y: body.y, z: body.z },
-        { y: yaw },
-      )
+      mp.sendPosition({ x: body.x, y: body.y, z: body.z }, { y: yaw })
 
-      updateScene(ctx, elapsed)
+      updateScene(ctx, elapsed, input.sprint && speed > 1)
       ctx.renderer.render(ctx.scene, ctx.camera)
     }
 
@@ -282,14 +301,12 @@ export default function Game({ roomId, avatar, playerName, onLeave }: GameProps)
       cleanupInput()
       mp.disconnect()
       window.removeEventListener('resize', onResize)
-      window.removeEventListener('keydown', onBuildKey)
+      window.removeEventListener('keydown', onGameKey)
       canvas.removeEventListener('mousedown', onMouseDown)
       canvas.removeEventListener('mouseup', onMouseUp)
       canvas.removeEventListener('contextmenu', onContextMenu)
       canvas.removeEventListener('wheel', onWheel)
-      for (const [, remote] of remotePlayers) {
-        disposeAvatar(remote.avatar)
-      }
+      for (const [, remote] of remotePlayers) disposeAvatar(remote.avatar)
       disposeAvatar(myAvatar)
       disposeBuilder(builder)
       disposeAllParticles(ctx.scene)
@@ -314,6 +331,11 @@ export default function Game({ roomId, avatar, playerName, onLeave }: GameProps)
         <div className="bg-black/60 backdrop-blur-sm rounded-lg px-4 py-2 text-white text-sm">
           <span className="text-indigo-300 font-bold">{playerCount}</span> online
         </div>
+        {activeEmote && (
+          <div className="bg-black/60 backdrop-blur-sm rounded-lg px-4 py-2 text-white text-sm">
+            {activeEmote === 'wave' ? '👋' : activeEmote === 'dance' ? '💃' : activeEmote === 'sit' ? '🪑' : '🎉'} {activeEmote}
+          </div>
+        )}
       </div>
 
       {/* Room code */}
@@ -341,6 +363,9 @@ export default function Game({ roomId, avatar, playerName, onLeave }: GameProps)
         Leave
       </button>
 
+      {/* Leaderboard */}
+      <Leaderboard entries={leaderboard} myId={myPlayerId} />
+
       {/* Builder HUD */}
       <BuilderHUD
         enabled={buildMode}
@@ -352,7 +377,7 @@ export default function Game({ roomId, avatar, playerName, onLeave }: GameProps)
       {/* Controls hint (desktop only) */}
       {!showTouch && (
         <div className="absolute bottom-20 left-4 bg-black/40 backdrop-blur-sm rounded-lg px-3 py-2 text-white/60 text-xs">
-          WASD move | Shift sprint | Space jump | B build | Click look | Enter chat
+          WASD move | Shift sprint | Space jump | B build | 1-4 emotes | Enter chat
         </div>
       )}
 

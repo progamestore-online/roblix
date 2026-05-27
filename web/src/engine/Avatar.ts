@@ -133,12 +133,18 @@ export function updateAvatarColors(avatar: AvatarMesh, colors: AvatarColors) {
   ;(avatar.rightLeg.material as THREE.MeshStandardMaterial).color.set(colors.legs)
 }
 
-export function animateWalk(avatar: AvatarMesh, time: number, speed: number) {
+export function animateWalk(avatar: AvatarMesh, time: number, speed: number, emote?: string | null) {
+  if (emote) {
+    animateEmote(avatar, time, emote)
+    return
+  }
   if (speed < 0.01) {
     avatar.leftArm.rotation.x *= 0.85
     avatar.rightArm.rotation.x *= 0.85
     avatar.leftLeg.rotation.x *= 0.85
     avatar.rightLeg.rotation.x *= 0.85
+    avatar.leftArm.rotation.z = 0
+    avatar.rightArm.rotation.z = 0
     return
   }
   const swing = Math.sin(time * 8) * 0.5
@@ -146,6 +152,45 @@ export function animateWalk(avatar: AvatarMesh, time: number, speed: number) {
   avatar.rightArm.rotation.x = -swing
   avatar.leftLeg.rotation.x = -swing
   avatar.rightLeg.rotation.x = swing
+  avatar.leftArm.rotation.z = 0
+  avatar.rightArm.rotation.z = 0
+}
+
+function animateEmote(avatar: AvatarMesh, time: number, emote: string) {
+  switch (emote) {
+    case 'wave':
+      avatar.rightArm.rotation.x = 0
+      avatar.rightArm.rotation.z = -Math.PI / 2 + Math.sin(time * 6) * 0.3
+      avatar.leftArm.rotation.x = 0
+      avatar.leftArm.rotation.z = 0
+      avatar.leftLeg.rotation.x = 0
+      avatar.rightLeg.rotation.x = 0
+      break
+    case 'dance':
+      avatar.leftArm.rotation.x = Math.sin(time * 10) * 0.8
+      avatar.rightArm.rotation.x = Math.sin(time * 10 + Math.PI) * 0.8
+      avatar.leftArm.rotation.z = Math.sin(time * 5) * 0.3
+      avatar.rightArm.rotation.z = -Math.sin(time * 5) * 0.3
+      avatar.leftLeg.rotation.x = Math.sin(time * 10 + Math.PI) * 0.4
+      avatar.rightLeg.rotation.x = Math.sin(time * 10) * 0.4
+      break
+    case 'sit':
+      avatar.leftLeg.rotation.x = -Math.PI / 2
+      avatar.rightLeg.rotation.x = -Math.PI / 2
+      avatar.leftArm.rotation.x = -0.2
+      avatar.rightArm.rotation.x = -0.2
+      avatar.leftArm.rotation.z = 0
+      avatar.rightArm.rotation.z = 0
+      break
+    case 'cheer':
+      avatar.leftArm.rotation.x = 0
+      avatar.rightArm.rotation.x = 0
+      avatar.leftArm.rotation.z = Math.PI / 2 + Math.sin(time * 8) * 0.2
+      avatar.rightArm.rotation.z = -Math.PI / 2 - Math.sin(time * 8) * 0.2
+      avatar.leftLeg.rotation.x = Math.sin(time * 4) * 0.1
+      avatar.rightLeg.rotation.x = -Math.sin(time * 4) * 0.1
+      break
+  }
 }
 
 export function disposeAvatar(avatar: AvatarMesh) {

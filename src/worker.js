@@ -18,8 +18,9 @@ const WORLDS = [
 export class RoomDO extends DurableObject {
   constructor(state, env) {
     super(state, env)
-    this.players = new Map() // ws -> { id, position, rotation, avatar, name }
-    this.messages = [] // last 50 chat messages
+    this.players = new Map()
+    this.messages = []
+    this.scores = new Map()
   }
 
   async fetch(req) {
@@ -39,19 +40,20 @@ export class RoomDO extends DurableObject {
       rotation: { y: 0 },
       avatar: { head: '#f5c542', torso: '#4287f5', arms: '#f5c542', legs: '#2d5a27' },
       name: `Player_${playerId.slice(0, 4)}`,
+      emote: null,
     }
 
     this.players.set(server, playerData)
+    this.scores.set(playerId, 0)
 
-    // Send initial state to the new player
     this.send(server, {
       type: 'init',
       playerId,
       players: Array.from(this.players.values()).filter(p => p.id !== playerId),
       messages: this.messages.slice(-50),
+      leaderboard: this.getLeaderboard(),
     })
 
-    // Notify others about the new player
     this.broadcast({ type: 'player_joined', player: playerData }, server)
 
     server.addEventListener('message', e => this.onMessage(server, e.data))
@@ -59,6 +61,15 @@ export class RoomDO extends DurableObject {
     server.addEventListener('error', () => this.onClose(server))
 
     return new Response(null, { status: 101, webSocket: client })
+  }
+
+  getLeaderboard() {
+    const entries = []
+    for (const [ws, player] of this.players) {
+      entries.push({ id: player.id, name: player.name, coins: this.scores.get(player.id) || 0 })
+    }
+    entries.sort((a, b) => b.coins - a.coins)
+    return entries.slice(0, 10)
   }
 
   onMessage(ws, data) {
@@ -86,13 +97,24 @@ export class RoomDO extends DurableObject {
     }
 
     if (msg.type === 'avatar_update') {
-      if (msg.avatar) {
-        player.avatar = { ...player.avatar, ...msg.avatar }
-      }
-      if (msg.name) {
-        player.name = msg.name.slice(0, 20)
-      }
+      if (msg.avatar) player.avatar = { ...player.avatar, ...msg.avatar }
+      if (msg.name) player.name = msg.name.slice(0, 20)
       this.broadcast({ type: 'player_updated', id: player.id, avatar: player.avatar, name: player.name })
+      return
+    }
+
+    if (msg.type === 'coin_collected') {
+      const count = Math.min(msg.count || 1, 10)
+      const current = this.scores.get(player.id) || 0
+      this.scores.set(player.id, current + count)
+      this.broadcast({ type: 'leaderboard', leaderboard: this.getLeaderboard() })
+      return
+    }
+
+    if (msg.type === 'emote') {
+      const emote = ['wave', 'dance', 'sit', 'cheer'].includes(msg.emote) ? msg.emote : null
+      player.emote = emote
+      this.broadcast({ type: 'player_emote', id: player.id, emote })
       return
     }
   }
@@ -100,8 +122,10 @@ export class RoomDO extends DurableObject {
   onClose(ws) {
     const player = this.players.get(ws)
     if (player) {
+      this.scores.delete(player.id)
       this.players.delete(ws)
       this.broadcast({ type: 'player_left', id: player.id })
+      this.broadcast({ type: 'leaderboard', leaderboard: this.getLeaderboard() })
     }
   }
 
@@ -120,18 +144,15 @@ export default {
   async fetch(req, env) {
     const url = new URL(req.url)
 
-    // POST /api/rooms/new — create a new room
     if (url.pathname === '/api/rooms/new') {
       if (req.method !== 'POST') return new Response('Method not allowed', { status: 405 })
       return Response.json({ roomId: randomId() })
     }
 
-    // GET /api/worlds — list available worlds/experiences
     if (url.pathname === '/api/worlds') {
       return Response.json({ worlds: WORLDS })
     }
 
-    // GET /api/rooms/{id}/ws — upgrade to WebSocket on the DO for this room
     const wsMatch = url.pathname.match(/^\/api\/rooms\/([a-z0-9-]+)\/ws$/)
     if (wsMatch) {
       const id = wsMatch[1]
@@ -141,13 +162,11 @@ export default {
       return obj.fetch(req)
     }
 
-    // SPA routes — serve index.html for client-side routing
     if (url.pathname.startsWith('/world/') || url.pathname.startsWith('/avatar') || url.pathname === '/lobby') {
       url.pathname = '/'
       return env.ASSETS.fetch(new Request(url.toString(), req))
     }
 
-    // Everything else: static asset (or SPA fallback via ASSETS binding)
     return env.ASSETS.fetch(req)
   },
 }

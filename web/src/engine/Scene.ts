@@ -135,7 +135,38 @@ export function createScene(canvas: HTMLCanvasElement): SceneContext {
   return { scene, camera, renderer, clock, sun, skyDome, clouds, ambientParticles }
 }
 
-export function updateScene(ctx: SceneContext, time: number) {
+export function updateScene(ctx: SceneContext, time: number, sprinting = false) {
+  // Sprint FOV
+  const targetFov = sprinting ? 72 : 60
+  ctx.camera.fov += (targetFov - ctx.camera.fov) * 0.08
+  ctx.camera.updateProjectionMatrix()
+
+  // Day/night cycle (5 minutes full cycle)
+  const dayPhase = (time % 300) / 300
+  const sunAngle = dayPhase * Math.PI * 2
+  const sunHeight = Math.sin(sunAngle)
+  const isDaytime = sunHeight > -0.1
+
+  ctx.sun.position.set(
+    Math.cos(sunAngle) * 80,
+    sunHeight * 80 + 10,
+    30,
+  )
+  ctx.sun.intensity = isDaytime ? Math.max(0.2, sunHeight) * 1.0 : 0.05
+
+  const skyMat = ctx.skyDome.material as THREE.ShaderMaterial
+  if (sunHeight > 0.2) {
+    skyMat.uniforms.topColor.value.setHex(0x3a7bd5)
+    skyMat.uniforms.bottomColor.value.setHex(0xc4e0f9)
+  } else if (sunHeight > -0.1) {
+    const t = (sunHeight + 0.1) / 0.3
+    skyMat.uniforms.topColor.value.lerpColors(new THREE.Color(0x0a1128), new THREE.Color(0x3a7bd5), t)
+    skyMat.uniforms.bottomColor.value.lerpColors(new THREE.Color(0x1a1a2e), new THREE.Color(0xc4e0f9), t)
+  } else {
+    skyMat.uniforms.topColor.value.setHex(0x0a1128)
+    skyMat.uniforms.bottomColor.value.setHex(0x1a1a2e)
+  }
+
   // Drift clouds
   for (const cloud of ctx.clouds.children) {
     cloud.position.x += 0.02

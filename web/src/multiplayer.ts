@@ -6,6 +6,7 @@ export interface RemotePlayer {
   rotation: { y: number }
   avatar: AvatarColors
   name: string
+  emote: string | null
 }
 
 export interface ChatMessage {
@@ -16,13 +17,21 @@ export interface ChatMessage {
   timestamp: number
 }
 
+export interface LeaderboardEntry {
+  id: string
+  name: string
+  coins: number
+}
+
 export type ServerMessage =
-  | { type: 'init'; playerId: string; players: RemotePlayer[]; messages: ChatMessage[] }
+  | { type: 'init'; playerId: string; players: RemotePlayer[]; messages: ChatMessage[]; leaderboard: LeaderboardEntry[] }
   | { type: 'player_joined'; player: RemotePlayer }
   | { type: 'player_left'; id: string }
   | { type: 'player_moved'; id: string; position: { x: number; y: number; z: number }; rotation: { y: number } }
   | { type: 'player_updated'; id: string; avatar: AvatarColors; name: string }
+  | { type: 'player_emote'; id: string; emote: string | null }
   | { type: 'chat'; message: ChatMessage }
+  | { type: 'leaderboard'; leaderboard: LeaderboardEntry[] }
 
 export interface MultiplayerClient {
   connect(roomId: string): void
@@ -30,6 +39,8 @@ export interface MultiplayerClient {
   sendPosition(position: { x: number; y: number; z: number }, rotation: { y: number }): void
   sendChat(text: string): void
   sendAvatarUpdate(avatar: AvatarColors, name: string): void
+  sendCoinCollected(count: number): void
+  sendEmote(emote: string): void
   onMessage(handler: (msg: ServerMessage) => void): void
   isConnected(): boolean
 }
@@ -39,31 +50,22 @@ export function createMultiplayerClient(): MultiplayerClient {
   let handler: ((msg: ServerMessage) => void) | null = null
   let connected = false
   let lastPositionSent = 0
-  const POSITION_THROTTLE_MS = 50 // 20 updates/sec max
+  const POSITION_THROTTLE_MS = 50
 
   function connect(roomId: string) {
     const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:'
     const url = `${protocol}//${location.host}/api/rooms/${roomId}/ws`
     ws = new WebSocket(url)
 
-    ws.addEventListener('open', () => {
-      connected = true
-    })
-
+    ws.addEventListener('open', () => { connected = true })
     ws.addEventListener('message', (e) => {
       try {
         const msg = JSON.parse(e.data) as ServerMessage
         handler?.(msg)
-      } catch { /* ignore malformed */ }
+      } catch { /* ignore */ }
     })
-
-    ws.addEventListener('close', () => {
-      connected = false
-    })
-
-    ws.addEventListener('error', () => {
-      connected = false
-    })
+    ws.addEventListener('close', () => { connected = false })
+    ws.addEventListener('error', () => { connected = false })
   }
 
   function disconnect() {
@@ -79,13 +81,10 @@ export function createMultiplayerClient(): MultiplayerClient {
     send({ type: 'move', position, rotation })
   }
 
-  function sendChat(text: string) {
-    send({ type: 'chat', text })
-  }
-
-  function sendAvatarUpdate(avatar: AvatarColors, name: string) {
-    send({ type: 'avatar_update', avatar, name })
-  }
+  function sendChat(text: string) { send({ type: 'chat', text }) }
+  function sendAvatarUpdate(avatar: AvatarColors, name: string) { send({ type: 'avatar_update', avatar, name }) }
+  function sendCoinCollected(count: number) { send({ type: 'coin_collected', count }) }
+  function sendEmote(emote: string) { send({ type: 'emote', emote }) }
 
   function send(msg: unknown) {
     if (ws && ws.readyState === WebSocket.OPEN) {
@@ -93,13 +92,8 @@ export function createMultiplayerClient(): MultiplayerClient {
     }
   }
 
-  function onMessage(h: (msg: ServerMessage) => void) {
-    handler = h
-  }
+  function onMessage(h: (msg: ServerMessage) => void) { handler = h }
+  function isConnected() { return connected }
 
-  function isConnected() {
-    return connected
-  }
-
-  return { connect, disconnect, sendPosition, sendChat, sendAvatarUpdate, onMessage, isConnected }
+  return { connect, disconnect, sendPosition, sendChat, sendAvatarUpdate, sendCoinCollected, sendEmote, onMessage, isConnected }
 }
